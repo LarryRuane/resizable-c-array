@@ -5,9 +5,9 @@ This code (tiny library, about 300 lines) implements a dynamically-allocated dat
 
 This library uses the standard C library memory allocation functions, `malloc`, `realloc`, and `free`. A secondary advantage in some environments is that the library allocates memory in "reasonable" size chunks (most commonly, 2k bytes). In some systems, once a memory buffer of a particular length is allocated it remains that length from then on. That is, if it is freed, then only a request of that length (or often, within a power of 2 of that length) will cause the buffer to be reused. In general, memory remains less fragmented if all or most of the allocations are small and of the same size.
 
-I've developed and tested this code only using gcc (on Linux). Porting it elsewhere will likely require some tweaks.
+I've developed and tested this code only using gcc (on Linux). Porting it elsewhere may require tweaks.
 
-# user interface
+## user interface
 This library is written in a style that is unusual for C, but will be familiar to C++ programmers. It is analogous to a template container library, such that before creating an instance of an array, you indicate the type of its elements, and code is then "generated" for that particular type. For example, you might create an array type to contain 16-bit (short) integers. Then you may create any number of instances of this array type. Or you may create an array of some arbitrarily complex structure. Or an array of characters, or an array of pointers to a particular type.
 
 All accesses of these arrays are fully type-checked.
@@ -25,9 +25,11 @@ It's easiest to see with an example (see the source file rsarray_test.c for this
 #undef RSA_ITEM_T
 #undef RSA_CLASS_NAME
 ```
-This defines an array-type to hold integers (type `int`). The type that RSA_ITEM_T is defined as can be any type, built-in, user-supplied, pointer and so on. You also specify an arbitrary class name, in this case `myint`. By next including `rsarray_template.h`, code is generated at that point in the source file. It's always a good idea to then undefine the two symbols, in case an array of a different base type is defined within the same source file.
+This defines an array-type to hold integers (type `int`). The type that RSA_ITEM_T is defined as can be any type, built-in, user-supplied, pointer and so on. You also specify an arbitrary class name, in this case `myint`. By next including `rsarray_template.h`, code is generated at that point in the source file. All the generated functions begin with `myint_rsa` (the class name appended with `_rsa`). It's always a good idea to then undefine the two symbols, in case an array of a different base type is defined within the same source file.
 
-Next we'll see a function that creates an instance of this array:
+One might wonder why what is the purpose of the `RSA_CLASS_NAME` in this implementation. Why isn't `RSA_ITEM_T` sufficient, with the function names all beginning with `int_rsa`? The reason for the class name is that it allows for increased type checking. Suppose you're writing a storage application and need an array of byte offsets and an array of block offsets. By generating two array types, with class names that include `byte` and `block` respectively, then it's not possible to pass a reference to a `byte` array to a function that expects a `block` array. Also the class name reminds the readers of the _meaning_ of the array elements.
+
+Now that we've defined an array type, next we'll see a function that creates an instance of this array:
 ```
 static void
 test_rsarray_basic(void)
@@ -41,7 +43,7 @@ Before we can add a value to this array, we need to give it non-zero length. We'
     /* make array one element in length */
     myint_rsa_realloc(&my, 1);
 ```
-A disadvantage of this library is that a special syntax is needed to access the array. Rather than having separate `get` (or `read`) and `set` (or `write`) functions, I decided to implement a single "access" function that returns the address of the array element. There will usually be an asterisk before calls to this function. When the expression `*myint_rsa(..)` is on the left of the assignment, the value is being set; otherwise, when it is part of an expression, it is being read. Here we see both:
+A disadvantage of this library is that a special syntax is needed to access the array; the C bracket syntax doesn't work. Rather than having separate `get` (or `read`) and `set` (or `write`) functions, I decided to implement a single "access" function that returns the address of the array element. There will usually be an asterisk before calls to this function. When the expression `*myint_rsa(..)` is on the left of the assignment, the value is being set; otherwise, when it is part of an expression, it is being read. Here we see both:
 ```
     /* set and read back the first (only) array element */
     *myint_rsa(&my, 0) = 77;
@@ -63,7 +65,24 @@ When an array is no longer needed (and certainly before it goes out of scope), i
 ```
 (There is no harm in setting the length to zero, or anything else, multiple times.)
 
-# pointer arithmetic
+There are two methods for copying between standard C arrays and rs arrays. The `copyin` method imports from a standard array into an rsarray beginning at a given offset and for a given length. The `copyout` method exports from an rsarray to a standard array. The functionality of these methods can be implemented by looping over the desired range of individual array offsets but these methods are more efficient because they know the internal structure of the rsarray and can use memcpy to copy a large number of elements at a time.
+
+There is also a `zero` method that is similar to `copyin` except it simply sets the given rsarray range to zeros.
+
+There are examples of these methods in the test program, `rsarray_test.c`.
+
+## api methods
+Here is the full list of methods defined by this example class; see test program or `rsarray_template.h` for argument lists:
+
+- `myint_rsa_init`
+- `myint_rsa` (accessor)
+- `myint_realloc`
+- `myint_free`
+- `myint_zero`
+- `myint_copyin`
+- `myint_copyout`
+
+## pointer arithmetic
 As mentioned, pointer arithmetic is not allowed with these arrays. Pointer arithmetic includes subtracting the base of an array from a pointer into the array to generate an index, for example:
 
 ```
@@ -98,10 +117,10 @@ None of these is allowed; the only way to access the array is through indexing (
   }
 ```
 
-# 32 or 64 bit index
+## 32 or 64 bit index
 This library can operate with either 32-bit or 64-bit indices (default 32-bit). The 32-bit version supports arrays with up to 4g entries. The 64-bit version supports much larger arrays. The symbol `rsa_len_t` should be defined to be either a 32-bit types (`unsigned int`) or 64-bit type (`unsigned long int` with gcc at least).
 
-# implementation
+## implementation
 An rsarray (resizable array) is a four-level tree structure. In the 32-bit version, each level corresponds to 8 bits of the index. Each level has a fanout of 256. The first three levels are arrays of pointers to the next level. These arrays are (up to) 2k bytes in length (assuming 8-byte pointers, 256 times 8). The last level contains the actual user entries (as just a standard C array). The size in bytes of these arrays is (up to) 256 times the size of each array entry.
 
 The reason there are always exactly four levels, each corresponding to exactly 8 bits, is so that the `access` method (in the example, `myint_rsa()`), which is critical to performance, has no conditionals and no loops. It is straight-line code with constant shift and mask arguments, which can be highly optimized by modern instruction pipeline-aware compilers. See the `ACCESS` method in rsarray_template.h. (The functions called there, `rsa_shift` and `rsa_mask`, are trivial and inline, returning constants.)
@@ -110,10 +129,10 @@ All of these arrays (of either pointers or user elements) are actually allocated
 
 Note that this design means that calling code should not cache pointers to elements across array reallocations.
 
-# memory overhead
-It is easy to calculate the memory overhead as a function of the base type. The highest overhead would be for an array of characters. If the string is significantly large, then for each 256 characters, there is one 8-byte pointer to it, which is an overhead of just over 3%. (There are arrays of pointers in higher levels, but their space usage is trivial.) There is actually some overhead for each `malloc` that we're neglecting here. If the array elements are 8-byte pointers, then the overhead is 8 / 2k which is about 0.4%. The overhead becomes lower as the element increases.
+## memory overhead
+It is easy to calculate the memory overhead as a function of the base type. The highest overhead would be for an array of characters, since `char` is the smallest type (one byte). If the string is significantly large, then for each 256 characters, there is one 8-byte pointer to it, which is an overhead of (8/256) which is just over 3%. (There are arrays of pointers in higher levels, but their space usage is trivial.) There is actually some C-library overhead for each `malloc` that we're neglecting here since it's unknown. If the array elements are 8-byte pointers, then the overhead is 8 / 2k which is about 0.4%. The overhead becomes lower as the element size increases.
 
 The memory overhead scales downward well too. An array with one element creates 4 allocations, 3 that are each 8 bytes (one pointer), and one that is the length of the base type.
 
 # conclusion
-I hope this is useful to you! If you end up using this code, I'd appreciate it if you let me know at LarryRuane@gmail.com.
+I hope this is useful to you! If you end up using this code, I'd appreciate it if you let me know at LarryRuane@gmail.com. Please also send me comments, problem reports or suggestions.
