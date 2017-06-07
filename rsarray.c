@@ -64,7 +64,6 @@ void rsarray_realloc(
 {
     assert(level <= 3);
     assert(p);
-    if(0) assert(!old_len == !(*p)); /* bool conditions */
     if (old_len == new_len) {
         /* nothing to do */
         return;
@@ -125,7 +124,6 @@ void rsarray_realloc(
             *p = realloc(*p, new_alloc_len); /* from old_alloc_len */
         } else {
             free(*p); /* old_alloc_len */
-            if(0) *p = (void *)0;
         }
     }
 }
